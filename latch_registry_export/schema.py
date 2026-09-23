@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from collections.abc import Mapping
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -109,6 +110,34 @@ class TableSchema:
     sql_name: str
     display_name: str | None
     columns: tuple[ColumnSchema, ...]
+
+
+@dataclass(frozen=True)
+class SchemaIndex:
+    """Lookup maps over a set of table schemas, built once and shared by callers."""
+
+    by_id: dict[str, TableSchema]
+    by_sql_name: dict[str, TableSchema]
+
+    @classmethod
+    def from_schemas(cls, schemas: Sequence[TableSchema]) -> "SchemaIndex":
+        """
+        Build a `SchemaIndex` from `schemas`.
+
+        Args:
+            schemas: The table schemas to index.
+
+        Returns:
+            A `SchemaIndex` with `by_id`/`by_sql_name` covering every schema.
+        """
+        return cls(
+            by_id={s.table_id: s for s in schemas},
+            by_sql_name={s.sql_name: s for s in schemas},
+        )
+
+    def sql_name_for(self, table_id: str) -> str:
+        """Return the sql_name of the schema with the given `table_id`."""
+        return self.by_id[table_id].sql_name
 
 
 # Instantiate each dtype (e.g. `pl.Utf8()` not bare `pl.Utf8`): polars dtype "shortcuts"

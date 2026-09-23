@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from latch_registry_export.errors import MissingTableError
+from latch_registry_export.schema import SchemaIndex
 from latch_registry_export.schema import TableSchema
 
 
@@ -47,14 +48,14 @@ class ResolvedPlan:
 
 
 def _collect_links(
-    schemas: Sequence[TableSchema], id_to_sql: dict[str, str]
+    schemas: Sequence[TableSchema], index: SchemaIndex
 ) -> tuple[list[LinkPlan], dict[str, set[str]]]:
     """
     Build the per-column link plans and the enforced-FK ordering graph.
 
     Args:
         schemas: The table schemas to export.
-        id_to_sql: Map of table_id to sql_name, for all `schemas`.
+        index: Lookup maps over `schemas`.
 
     Returns:
         `(links, ordering_edges)`, where `ordering_edges` maps a source table's
@@ -63,7 +64,7 @@ def _collect_links(
 
     Raises:
         MissingTableError: One or more links (scalar or array) target a table not
-            in `id_to_sql`. All such links are reported together, not just the
+            in `index`. All such links are reported together, not just the
             first one found.
     """
     links: list[LinkPlan] = []
@@ -75,13 +76,13 @@ def _collect_links(
             target_id = col.link_target_table_id
             if target_id is None:
                 continue
-            if target_id not in id_to_sql:
+            if target_id not in index.by_id:
                 missing.append(
                     f"table {schema.table_id} column {col.registry_key!r} links to "
                     f"table {target_id}, which is not in the export config"
                 )
                 continue
-            target_sql = id_to_sql[target_id]
+            target_sql = index.sql_name_for(target_id)
             if col.is_list:
                 # Checked before the self-link case: a self-referential ARRAY link is
                 # `list_no_fk`, not `self_link`. Intentional and harmless either way,
@@ -103,7 +104,7 @@ def _collect_links(
     return links, ordering_edges
 
 
-def _find_cycle(ordering_edges: dict[str, set[str]], sql_to_id: dict[str, str]) -> list[str] | None:
+def _find_cycle(ordering_edges: dict[str, set[str]], index: SchemaIndex) -> list[str] | None:
     """
     Find one cycle in `ordering_edges`, deterministically (table_id-ordered DFS).
 
@@ -112,7 +113,7 @@ def _find_cycle(ordering_edges: dict[str, set[str]], sql_to_id: dict[str, str]) 
 
     Args:
         ordering_edges: Map of source sql_name to prerequisite parent sql_names.
-        sql_to_id: Map of sql_name to table_id, for all tables in `ordering_edges`.
+        index: Lookup maps for all tables in `ordering_edges`.
 
     Returns:
         The cycle as a list of sql_names, or None if the graph is acyclic.
@@ -125,7 +126,7 @@ def _find_cycle(ordering_edges: dict[str, set[str]], sql_to_id: dict[str, str]) 
     def dfs(node: str) -> list[str] | None:
         color[node] = 1
         stack.append(node)
-        for nxt in sorted(ordering_edges[node], key=lambda s: sql_to_id[s]):
+        for nxt in sorted(ordering_edges[node], key=lambda s: index.by_sql_name[s].table_id):
             if color.get(nxt, 0) == 0:
                 found = dfs(nxt)
                 if found is not None:
@@ -136,7 +137,7 @@ def _find_cycle(ordering_edges: dict[str, set[str]], sql_to_id: dict[str, str]) 
         color[node] = 2
         return None
 
-    for start in sorted(ordering_edges, key=lambda s: sql_to_id[s]):
+    for start in sorted(ordering_edges, key=lambda s: index.by_sql_name[s].table_id):
         if color.get(start, 0) == 0:
             found = dfs(start)
             if found is not None:
@@ -145,7 +146,7 @@ def _find_cycle(ordering_edges: dict[str, set[str]], sql_to_id: dict[str, str]) 
 
 
 def _break_cycles(
-    ordering_edges: dict[str, set[str]], sql_to_id: dict[str, str]
+    ordering_edges: dict[str, set[str]], index: SchemaIndex
 ) -> tuple[dict[str, set[str]], set[tuple[str, str]]]:
     """
     Remove enforced edges, on a copy, until the graph is acyclic.
@@ -157,7 +158,7 @@ def _break_cycles(
     Args:
         ordering_edges: Map of source sql_name to prerequisite parent sql_names.
             Not mutated; a copy is edited and returned.
-        sql_to_id: Map of sql_name to table_id, for all tables in `ordering_edges`.
+        index: Lookup maps for all tables in `ordering_edges`.
 
     Returns:
         `(acyclic_edges, demoted)`: the acyclic copy of `ordering_edges`, and the
@@ -166,14 +167,17 @@ def _break_cycles(
     acyclic_edges = {node: set(parents) for node, parents in ordering_edges.items()}
     demoted: set[tuple[str, str]] = set()
     while True:
-        cycle = _find_cycle(acyclic_edges, sql_to_id)
+        cycle = _find_cycle(acyclic_edges, index)
         if cycle is None:
             return acyclic_edges, demoted
         # `cycle` is a path returned from a DFS stack, so consecutive elements
         # (including the closing edge back to cycle[0]) are edge-connected by
         # construction: `cycle_edges` is never empty, so `max()` is always safe.
         cycle_edges = [(cycle[i], cycle[(i + 1) % len(cycle)]) for i in range(len(cycle))]
-        worst = max(cycle_edges, key=lambda e: (sql_to_id[e[0]], sql_to_id[e[1]]))
+        worst = max(
+            cycle_edges,
+            key=lambda e: (index.by_sql_name[e[0]].table_id, index.by_sql_name[e[1]].table_id),
+        )
         acyclic_edges[worst[0]].discard(worst[1])
         demoted.add(worst)
 
@@ -206,14 +210,14 @@ def _apply_demotions(links: Iterable[LinkPlan], demoted: set[tuple[str, str]]) -
     return resolved
 
 
-def _topological_order(ordering_edges: dict[str, set[str]], sql_to_id: dict[str, str]) -> list[str]:
+def _topological_order(ordering_edges: dict[str, set[str]], index: SchemaIndex) -> list[str]:
     """
     Compute a deterministic, parents-first topological order.
 
     Args:
         ordering_edges: The (now acyclic) map of source sql_name to prerequisite
             parent sql_names.
-        sql_to_id: Map of sql_name to table_id, for all tables in `ordering_edges`.
+        index: Lookup maps for all tables in `ordering_edges`.
 
     Returns:
         The table sql_names in topological order.
@@ -226,14 +230,14 @@ def _topological_order(ordering_edges: dict[str, set[str]], sql_to_id: dict[str,
     def visit(node: str) -> None:
         if node in visited:
             return
-        for parent in sorted(ordering_edges[node], key=lambda s: sql_to_id[s]):
+        for parent in sorted(ordering_edges[node], key=lambda s: index.by_sql_name[s].table_id):
             visit(parent)
         visited.add(node)
         order.append(node)
 
     # All ordering (here and in `_find_cycle`/`_break_cycles`) is keyed on table_id,
     # not sql_name, so results are independent of schema input order.
-    for node in sorted(ordering_edges, key=lambda s: sql_to_id[s]):
+    for node in sorted(ordering_edges, key=lambda s: index.by_sql_name[s].table_id):
         visit(node)
     return order
 
@@ -251,14 +255,13 @@ def resolve_dependencies(schemas: Sequence[TableSchema]) -> ResolvedPlan:
     Raises:
         MissingTableError: A link (scalar or array) targets a table not in `schemas`.
     """
-    id_to_sql = {s.table_id: s.sql_name for s in schemas}
-    sql_to_id = {s.sql_name: s.table_id for s in schemas}
+    index = SchemaIndex.from_schemas(schemas)
 
-    links, ordering_edges = _collect_links(schemas, id_to_sql)
-    acyclic_edges, demoted = _break_cycles(ordering_edges, sql_to_id)
+    links, ordering_edges = _collect_links(schemas, index)
+    acyclic_edges, demoted = _break_cycles(ordering_edges, index)
     resolved_links = _apply_demotions(links, demoted)
     resolved_links.sort(key=lambda lp: (lp.table_sql_name, lp.column_sql_name))
-    order = _topological_order(acyclic_edges, sql_to_id)
+    order = _topological_order(acyclic_edges, index)
 
     fk_status_by_column = {
         (lp.table_sql_name, lp.column_sql_name): lp.fk_status for lp in resolved_links
