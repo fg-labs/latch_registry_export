@@ -6,11 +6,15 @@ import re
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Annotated
+from typing import Self
 
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
+from pydantic import StringConstraints
 from pydantic import ValidationError
+from pydantic import model_validator
 
 from latch_registry_export.errors import InvalidConfigError
 from latch_registry_export.errors import InvalidTableNameError
@@ -18,14 +22,43 @@ from latch_registry_export.errors import InvalidTableNameError
 SQL_IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 RESERVED_PREFIX = "_export_"
 
+ColumnKeys = Annotated[
+    tuple[Annotated[str, StringConstraints(min_length=1)], ...], Field(min_length=1)
+]
+"""A non-empty list of exact Registry column keys."""
+
 
 class TableConfig(BaseModel):
-    """A single table to export."""
+    """
+    A single table to export.
+
+    Attributes:
+        id: The Registry table id.
+        name: An optional DuckDB table-name override.
+        include_columns: Export only these Registry column keys.
+        exclude_columns: Export every column except these Registry column keys.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str = Field(min_length=1)
     name: str | None = None
+    include_columns: ColumnKeys | None = None
+    exclude_columns: ColumnKeys | None = None
+
+    @model_validator(mode="after")
+    def _validate_column_selection(self) -> Self:
+        """Reject both column lists together, or a column listed twice in one list."""
+        if self.include_columns is not None and self.exclude_columns is not None:
+            raise ValueError("set include_columns or exclude_columns, not both")
+        for field_name, keys in (
+            ("include_columns", self.include_columns),
+            ("exclude_columns", self.exclude_columns),
+        ):
+            duplicates = _find_duplicates(keys or ())
+            if duplicates:
+                raise ValueError(f"duplicate column in {field_name}: {duplicates}")
+        return self
 
 
 def _validate_override(name: str) -> None:
@@ -63,8 +96,9 @@ def load_table_configs(path: Path) -> list[TableConfig]:
         The parsed, validated table configs in file order.
 
     Raises:
-        InvalidConfigError: Malformed TOML, an invalid `[[tables]]` entry, an empty
-            table list, duplicate ids, or duplicate name overrides.
+        InvalidConfigError: Malformed TOML, an invalid `[[tables]]` entry (including a
+            bad column selection), an empty table list, duplicate ids, or duplicate
+            name overrides.
         InvalidTableNameError: A name override is not a valid identifier.
     """
     with path.open("rb") as fh:

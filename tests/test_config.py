@@ -74,3 +74,61 @@ def test_load_wraps_upstream_errors_as_invalid_config_error(
     path = _write(tmp_path, toml_text)
     with pytest.raises(InvalidConfigError, match=match):
         load_table_configs(path)
+
+
+@pytest.mark.parametrize(
+    ("toml_text", "expected"),
+    [
+        pytest.param(
+            '[[tables]]\nid = "1"\n',
+            TableConfig(id="1"),
+            id="no-column-selection",
+        ),
+        pytest.param(
+            '[[tables]]\nid = "1"\ninclude_columns = ["Gene", "Sample"]\n',
+            TableConfig(id="1", include_columns=("Gene", "Sample")),
+            id="include-columns",
+        ),
+        pytest.param(
+            '[[tables]]\nid = "1"\nexclude_columns = ["Transcript Sequence"]\n',
+            TableConfig(id="1", exclude_columns=("Transcript Sequence",)),
+            id="exclude-columns-with-space",
+        ),
+    ],
+)
+def test_load_column_selection(tmp_path: Path, toml_text: str, expected: TableConfig) -> None:
+    assert load_table_configs(_write(tmp_path, toml_text)) == [expected]
+
+
+@pytest.mark.parametrize(
+    ("toml_text", "match"),
+    [
+        pytest.param(
+            '[[tables]]\nid = "1"\ninclude_columns = ["a"]\nexclude_columns = ["b"]\n',
+            "not both",
+            id="include-and-exclude",
+        ),
+        pytest.param(
+            '[[tables]]\nid = "1"\ninclude_columns = []\n', "at least 1", id="empty-include"
+        ),
+        pytest.param(
+            '[[tables]]\nid = "1"\nexclude_columns = []\n', "at least 1", id="empty-exclude"
+        ),
+        pytest.param(
+            '[[tables]]\nid = "1"\ninclude_columns = ["a", "b", "a"]\n',
+            r"duplicate column in include_columns: \['a'\]",
+            id="duplicate-include",
+        ),
+        pytest.param(
+            '[[tables]]\nid = "1"\nexclude_columns = ["b", "b"]\n',
+            r"duplicate column in exclude_columns: \['b'\]",
+            id="duplicate-exclude",
+        ),
+        pytest.param(
+            '[[tables]]\nid = "1"\ninclude_columns = [""]\n', "at least 1", id="empty-column-name"
+        ),
+    ],
+)
+def test_load_rejects_bad_column_selection(tmp_path: Path, toml_text: str, match: str) -> None:
+    with pytest.raises(InvalidConfigError, match=match):
+        load_table_configs(_write(tmp_path, toml_text))
