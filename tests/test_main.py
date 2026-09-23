@@ -33,6 +33,7 @@ def _report(
         tool_version="0.0.0",
         dependency_versions={},
         workspace_id="ws-1",
+        workspace_name="ws-1",
         row_counts=row_counts,
         issue_counts=issue_counts or {},
         degraded_links=degraded_links,

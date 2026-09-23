@@ -85,6 +85,7 @@ def test_export_writes_and_report_roundtrips(
     report = load_report(out)
     assert report.row_counts["samples"] == 1
     assert report.workspace_id == "ws"
+    assert report.workspace_name == "Test"
 
 
 def test_export_overwrite_replaces_existing_file(
