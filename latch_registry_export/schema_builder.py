@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from collections.abc import Sequence
+from typing import TypeVar
 
 from latch_registry_export.config import RESERVED_PREFIX
 from latch_registry_export.config import TableConfig
 from latch_registry_export.errors import InvalidTableNameError
+from latch_registry_export.errors import UnknownColumnError
 from latch_registry_export.schema import HasUpstreamType
 from latch_registry_export.schema import TableSchema
 from latch_registry_export.schema import build_table_schema
 from latch_registry_export.schema import sanitize_identifier
+
+logger = logging.getLogger(__name__)
+
+_ColumnT = TypeVar("_ColumnT")
 
 
 class _UpstreamTypeColumn:
@@ -42,6 +49,8 @@ def build_schemas(tables: Sequence[TableConfig]) -> list[TableSchema]:
     Raises:
         InvalidTableNameError: A resolved table name uses the reserved
             `_export_` prefix, or two tables resolve to the same name.
+        UnknownColumnError: A table's `include_columns`/`exclude_columns` names a
+            column the table does not have, or `exclude_columns` drops every column.
     """
     from latch.registry.table import Table
 
@@ -52,8 +61,10 @@ def build_schemas(tables: Sequence[TableConfig]) -> list[TableSchema]:
         display_name = table.get_display_name()
         columns: dict[str, HasUpstreamType] = {
             key: _UpstreamTypeColumn(dict(col.upstream_type))
-            for key, col in (table.get_columns() or {}).items()
+            for key, col in _select_columns(cfg, table.get_columns() or {}).items()
         }
+        if cfg.include_columns is not None or cfg.exclude_columns is not None:
+            logger.info("Table %s: exporting columns %s", cfg.id, sorted(columns))
         sql_name = (
             cfg.name
             if cfg.name is not None
@@ -67,6 +78,44 @@ def build_schemas(tables: Sequence[TableConfig]) -> list[TableSchema]:
             )
         )
     return schemas
+
+
+def _select_columns(cfg: TableConfig, columns: Mapping[str, _ColumnT]) -> dict[str, _ColumnT]:
+    """
+    Apply a table config's `include_columns`/`exclude_columns` to its Registry columns.
+
+    Args:
+        cfg: The table config.
+        columns: The table's Registry columns, keyed by column key.
+
+    Returns:
+        The selected subset of `columns`; all of `columns` if neither list is set.
+
+    Raises:
+        UnknownColumnError: A listed key is not in `columns` (keys match exactly, so
+            case matters), or `exclude_columns` drops every column.
+    """
+    field_name, listed = (
+        ("include_columns", cfg.include_columns)
+        if cfg.include_columns is not None
+        else ("exclude_columns", cfg.exclude_columns)
+    )
+    if listed is None:
+        return dict(columns)
+
+    unknown = sorted(set(listed) - set(columns))
+    if unknown:
+        raise UnknownColumnError(
+            f"table {cfg.id} has no column(s) {unknown} listed in {field_name}; "
+            f"available columns: {sorted(columns)}"
+        )
+
+    if field_name == "include_columns":
+        return {key: col for key, col in columns.items() if key in listed}
+    selected = {key: col for key, col in columns.items() if key not in listed}
+    if not selected:
+        raise UnknownColumnError(f"table {cfg.id}: exclude_columns excludes every data column")
+    return selected
 
 
 def _validate_resolved_table_name(sql_name: str, used: set[str]) -> None:

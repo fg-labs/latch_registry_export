@@ -22,6 +22,25 @@ name = "samples"   # optional DuckDB table-name override
 id = "12146"
 ```
 
+To export only some columns of a table, set `include_columns` or `exclude_columns`
+(not both) to a list of exact Registry column keys:
+
+```toml
+[[tables]]
+id = "11730"
+exclude_columns = ["Transcript Sequence"]   # export all columns except these
+
+[[tables]]
+id = "12146"
+include_columns = ["Gene", "Sample"]        # export only these columns
+```
+
+The export always includes the record `name` column. Keys are case-sensitive, and
+the export fails if a listed key is not a column of the table. If you exclude a link
+column, the export does not create its foreign key, so the linked table need not be
+in the config. The exporter still fetches all columns from the Registry, so column
+selection makes the output smaller but not the fetch faster.
+
 Log in to Latch and select the workspace:
 
 ```console
