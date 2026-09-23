@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
+from enum import StrEnum
 from pathlib import Path
-from typing import Literal
-from typing import TypeAlias
 
 from latch_registry_export import export
 from latch_registry_export import load_report
@@ -13,7 +12,14 @@ from latch_registry_export import load_table_configs
 
 logger = logging.getLogger("latch_registry_export")
 
-LogLevel: TypeAlias = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
+
+class LogLevel(StrEnum):
+    """Logging levels accepted by the CLI."""
+
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
 
 
 def export_cli(
@@ -22,7 +28,7 @@ def export_cli(
     output: Path,
     page_size: int = 100,
     overwrite: bool = False,
-    log_level: LogLevel = "INFO",
+    log_level: LogLevel = LogLevel.INFO,
 ) -> None:
     """
     Export configured Latch Registry tables to a DuckDB file.
