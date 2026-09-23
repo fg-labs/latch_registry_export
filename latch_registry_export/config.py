@@ -1,4 +1,4 @@
-"""Config model, TOML loader, and canonical config hashing."""
+"""Config model and TOML loader."""
 
 from __future__ import annotations
 
