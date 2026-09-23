@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from latch_registry_export.api import ExportReport
 from latch_registry_export.config import TableConfig
 from latch_registry_export.errors import OutputExistsError
 from latch_registry_export.main import run
+from latch_registry_export.main import setup_logging
 from latch_registry_export.tools.export import export_cli
 
 
@@ -228,3 +230,16 @@ def test_cli_lets_unexpected_errors_propagate(
 
     with pytest.raises(RuntimeError, match="genuinely unexpected"):
         run()
+
+
+def test_setup_logging_silences_gql_payload_logs() -> None:
+    """Gql logs full request/response bodies at INFO; `setup_logging` must suppress them."""
+    gql_logger = logging.getLogger("gql")
+    original_level = gql_logger.level
+    try:
+        setup_logging()
+        transport_logger = logging.getLogger("gql.transport.requests")
+        assert not transport_logger.isEnabledFor(logging.INFO)
+        assert transport_logger.isEnabledFor(logging.WARNING)
+    finally:
+        gql_logger.setLevel(original_level)
