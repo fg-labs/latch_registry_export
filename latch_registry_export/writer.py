@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import time
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -29,6 +30,70 @@ from latch_registry_export.serialize import serialize
 from latch_registry_export.serialize import to_naive_utc
 
 logger = logging.getLogger(__name__)
+
+PROGRESS_LOG_INTERVAL_SECONDS = 30.0
+"""Minimum time between two progress log lines for one table."""
+
+
+def _monotonic() -> float:
+    """Return `time.monotonic()`; a separate function so tests can substitute a fake clock."""
+    return time.monotonic()
+
+
+def _format_elapsed(seconds: float) -> str:
+    """
+    Format a duration for a log line.
+
+    Args:
+        seconds: The duration in seconds; fractions of a second are truncated.
+
+    Returns:
+        `"4s"`, `"1m 16s"`, or `"1h 02m 03s"`.
+    """
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
+class _TableProgress:
+    """Logs one table's running record count, at most once per `PROGRESS_LOG_INTERVAL_SECONDS`."""
+
+    def __init__(self, table_sql_name: str) -> None:
+        self._table_sql_name = table_sql_name
+        self._started = _monotonic()
+        self._last_logged = self._started
+
+    def _rate(self, row_count: int, now: float) -> str:
+        elapsed = now - self._started
+        return f"{row_count / elapsed:,.1f}" if elapsed > 0 else "n/a"
+
+    def log_if_due(self, row_count: int) -> None:
+        """Log the running count if the interval has passed since the last log line."""
+        now = _monotonic()
+        if now - self._last_logged < PROGRESS_LOG_INTERVAL_SECONDS:
+            return
+        self._last_logged = now
+        logger.info(
+            "%s: %s records (%s records/s)",
+            self._table_sql_name,
+            f"{row_count:,}",
+            self._rate(row_count, now),
+        )
+
+    def log_done(self, row_count: int) -> None:
+        """Log the final count, elapsed time, and average rate."""
+        now = _monotonic()
+        logger.info(
+            "%s: done, %s records in %s (%s records/s)",
+            self._table_sql_name,
+            f"{row_count:,}",
+            _format_elapsed(now - self._started),
+            self._rate(row_count, now),
+        )
 
 
 @dataclass(frozen=True)
@@ -90,8 +155,15 @@ def write_export(
     written_names: dict[str, set[str]] = {schema.sql_name: set() for schema in schemas}
 
     all_issue_rows: list[_IssueRow] = []
-    for sql_name in plan.insert_order:
+    for position, sql_name in enumerate(plan.insert_order, start=1):
         schema = index.by_sql_name[sql_name]
+        logger.info(
+            "Exporting table %d/%d: %s (id %s)",
+            position,
+            len(plan.insert_order),
+            sql_name,
+            schema.table_id,
+        )
         row_count, max_last_updated, issue_rows = _load_table(
             schema,
             plan,
@@ -274,6 +346,7 @@ def _load_table(
             conn.unregister("_page")
         page.clear()
 
+    progress = _TableProgress(schema.sql_name)
     records_iter = iter(fetch_table_records(schema.table_id, page_size=page_size))
     while True:
         try:
@@ -317,8 +390,10 @@ def _load_table(
         row_count += 1
         if len(page) >= page_size:
             flush_page()
+            progress.log_if_due(row_count)
 
     flush_page()
+    progress.log_done(row_count)
     return row_count, max_last_updated, issue_rows
 
 
