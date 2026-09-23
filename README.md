@@ -54,6 +54,15 @@ Then export the tables to a DuckDB file:
 uv run latch_registry_export --config tables.toml --output registry.duckdb
 ```
 
+To use a different workspace for one run, set `LATCH_WORKSPACE` to its id.
+This does not change the workspace that `latch workspace` selected:
+
+```console
+LATCH_WORKSPACE=12345 uv run latch_registry_export --config tables.toml --output registry.duckdb
+```
+
+The export records the workspace id in the `_export_run` table.
+
 Options:
 - `--page-size N` — page size for streaming records from the Registry (default 100).
 - `--overwrite` — replace an existing output file.
