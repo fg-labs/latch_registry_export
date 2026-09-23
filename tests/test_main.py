@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from latch_registry_export.api import ExportReport
 from latch_registry_export.config import TableConfig
 from latch_registry_export.errors import OutputExistsError
 from latch_registry_export.main import run
+from latch_registry_export.main import setup_logging
 from latch_registry_export.tools.export import export_cli
 
 
@@ -146,16 +148,75 @@ def test_export_cli_omits_empty_issue_and_degraded_sections(
     assert "degraded" not in out
 
 
+@pytest.fixture
+def restore_log_levels() -> Iterator[None]:
+    """Restore the root and `gql` logger levels after a test changes them."""
+    loggers = [logging.getLogger(), logging.getLogger("gql")]
+    original_levels = [lg.level for lg in loggers]
+    yield
+    for lg, level in zip(loggers, original_levels, strict=True):
+        lg.setLevel(level)
+
+
+@pytest.mark.parametrize(
+    ("log_level", "expected"),
+    [
+        pytest.param(None, logging.INFO, id="default-info"),
+        pytest.param("DEBUG", logging.DEBUG, id="debug"),
+        pytest.param("WARNING", logging.WARNING, id="warning"),
+        pytest.param("ERROR", logging.ERROR, id="error"),
+    ],
+)
+@pytest.mark.usefixtures("stubbed_export", "restore_log_levels")
+def test_cli_log_level_sets_root_level(
+    monkeypatch: MonkeyPatch,
+    table_config: Path,
+    tmp_path: Path,
+    log_level: str | None,
+    expected: int,
+) -> None:
+    """`--log-level` sets the root logger level; gql stays capped at WARNING."""
+    argv = ["latch_registry_export", "--config", str(table_config)]
+    argv += ["--output", str(tmp_path / "r.duckdb")]
+    if log_level is not None:
+        argv += ["--log-level", log_level]
+    monkeypatch.setattr("sys.argv", argv)
+
+    run()
+
+    assert logging.getLogger().level == expected
+    assert not logging.getLogger("gql.transport.requests").isEnabledFor(logging.INFO)
+
+
+def test_cli_rejects_unknown_log_level(monkeypatch: MonkeyPatch, table_config: Path) -> None:
+    """An unknown `--log-level` is a usage error (exit 2)."""
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "latch_registry_export",
+            "--config",
+            str(table_config),
+            "--output",
+            "x.duckdb",
+            "--log-level",
+            "LOUD",
+        ],
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        run()
+    assert exc_info.value.code == 2
+
+
 def test_cli_help_lists_expected_flags(
     monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
 ) -> None:
-    """`run()` with `--help` documents the config/output/page-size/overwrite flags."""
+    """`run()` with `--help` documents every CLI flag."""
     monkeypatch.setattr("sys.argv", ["latch_registry_export", "--help"])
     with pytest.raises(SystemExit) as exc_info:
         run()
     assert exc_info.value.code == 0
     out = capsys.readouterr().out
-    for flag in ("--config", "--output", "--page-size", "--overwrite"):
+    for flag in ("--config", "--output", "--page-size", "--overwrite", "--log-level"):
         assert flag in out
 
 
@@ -228,3 +289,16 @@ def test_cli_lets_unexpected_errors_propagate(
 
     with pytest.raises(RuntimeError, match="genuinely unexpected"):
         run()
+
+
+def test_setup_logging_silences_gql_payload_logs() -> None:
+    """Gql logs full request/response bodies at INFO; `setup_logging` must suppress them."""
+    gql_logger = logging.getLogger("gql")
+    original_level = gql_logger.level
+    try:
+        setup_logging()
+        transport_logger = logging.getLogger("gql.transport.requests")
+        assert not transport_logger.isEnabledFor(logging.INFO)
+        assert transport_logger.isEnabledFor(logging.WARNING)
+    finally:
+        gql_logger.setLevel(original_level)

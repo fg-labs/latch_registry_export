@@ -19,6 +19,9 @@ def setup_logging(level: str = "INFO") -> None:
     """
     Set up basic logging to print to the console.
 
+    The `gql` logger is capped at WARNING: its transports log every full request and
+    response body at INFO, which can reach gigabytes for large tables.
+
     Args:
         level: The root logging level, e.g. "INFO" or "DEBUG".
     """
@@ -26,6 +29,7 @@ def setup_logging(level: str = "INFO") -> None:
         level=level,
         format="%(asctime)s %(name)s:%(funcName)s:%(lineno)s [%(levelname)s]: %(message)s",
     )
+    logging.getLogger("gql").setLevel(logging.WARNING)
 
 
 def run() -> None:

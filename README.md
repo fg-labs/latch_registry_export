@@ -38,6 +38,8 @@ uv run latch_registry_export --config tables.toml --output registry.duckdb
 Options:
 - `--page-size N` — page size for streaming records from the Registry (default 100).
 - `--overwrite` — replace an existing output file.
+- `--log-level LEVEL` — one of `DEBUG`, `INFO`, `WARNING`, `ERROR` (default `INFO`).
+  The tool never logs GraphQL request and response bodies, at any level.
 
 The export writes provenance and data-quality metadata into the output database,
 alongside the exported tables:
