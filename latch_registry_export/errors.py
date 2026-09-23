@@ -37,5 +37,9 @@ class InvalidConfigError(ExportError):
     """
 
 
+class UnknownColumnError(ExportError):
+    """A config column selection names a missing column, or excludes every data column."""
+
+
 class UnsupportedTypeError(ExportError):
     """A Registry type has no DuckDB/polars mapping."""
