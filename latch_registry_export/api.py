@@ -31,6 +31,7 @@ class ExportReport:
     tool_version: str
     dependency_versions: Mapping[str, str]
     workspace_id: str
+    workspace_name: str
     row_counts: Mapping[str, int]
     issue_counts: Mapping[str, int]
     degraded_links: tuple[tuple[str, str], ...]
@@ -144,7 +145,7 @@ def load_report(db_path: Path) -> ExportReport:
     try:
         run = conn.execute(
             "SELECT tool_version, fglatch_version, latch_version, duckdb_version, "
-            "polars_version, pyarrow_version, workspace_id FROM _export_run"
+            "polars_version, pyarrow_version, workspace_id, workspace_name FROM _export_run"
         ).fetchone()
         if run is None:
             raise ValueError(f"no run metadata found in {db_path}")
@@ -178,6 +179,7 @@ def load_report(db_path: Path) -> ExportReport:
             "pyarrow": run[5],
         },
         workspace_id=run[6],
+        workspace_name=run[7],
         row_counts={k: int(v) for k, v in row_counts.items()},
         issue_counts={k: int(v) for k, v in issue_counts.items()},
         degraded_links=tuple(degraded),
