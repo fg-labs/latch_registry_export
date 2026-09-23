@@ -21,6 +21,7 @@ from latch_registry_export.errors import ConversionError
 from latch_registry_export.errors import DuplicateRecordNameError
 from latch_registry_export.errors import EmptyRecordNameError
 from latch_registry_export.schema import RECORD_NAME_COLUMN
+from latch_registry_export.schema import SchemaIndex
 from latch_registry_export.schema import TableSchema
 from latch_registry_export.schema import quote_identifier
 from latch_registry_export.serialize import Issue
@@ -82,23 +83,22 @@ def write_export(
     for statement in export_metadata_ddl():
         conn.execute(statement)
 
-    schema_by_sql_name = {schema.sql_name: schema for schema in schemas}
+    index = SchemaIndex.from_schemas(schemas)
     for sql_name in plan.insert_order:
-        conn.execute(create_table_sql(schema_by_sql_name[sql_name], plan))
+        conn.execute(create_table_sql(index.by_sql_name[sql_name], plan))
 
     written_names: dict[str, set[str]] = {schema.sql_name: set() for schema in schemas}
-    id_to_sql = {schema.table_id: schema.sql_name for schema in schemas}
 
     all_issue_rows: list[_IssueRow] = []
     for sql_name in plan.insert_order:
-        schema = schema_by_sql_name[sql_name]
+        schema = index.by_sql_name[sql_name]
         row_count, max_last_updated, issue_rows = _load_table(
             schema,
             plan,
             conn=conn,
             page_size=page_size,
             written_names=written_names,
-            id_to_sql=id_to_sql,
+            index=index,
         )
         all_issue_rows.extend(issue_rows)
         conn.execute(
@@ -109,7 +109,7 @@ def write_export(
         )
         _insert_column_provenance(schema, plan, conn=conn)
 
-    all_issue_rows.extend(_run_post_load_antijoin(schemas, plan, conn=conn))
+    all_issue_rows.extend(_run_post_load_antijoin(plan, conn=conn, index=index))
 
     # Issues are rare in a healthy export, so holding every row in memory before
     # one sorted, deterministic insert is an acceptable trade-off here. The sort
@@ -217,7 +217,7 @@ def _load_table(
     conn: duckdb.DuckDBPyConnection,
     page_size: int,
     written_names: dict[str, set[str]],
-    id_to_sql: Mapping[str, str],
+    index: SchemaIndex,
 ) -> tuple[int, dt.datetime | None, list[_IssueRow]]:
     """
     Stream one table's records, serialize each page, insert it, and collect issues.
@@ -235,7 +235,7 @@ def _load_table(
         page_size: Page size for `fetch_table_records` and per-page inserts.
         written_names: Map of table sql_name to the record names already written;
             read for enforced-FK dangling checks and updated with this table's names.
-        id_to_sql: Map of table_id to sql_name, for all exported tables.
+        index: Lookup maps for all exported tables.
 
     Returns:
         `(row_count, max_last_updated, issue_rows)` for this table;
@@ -250,7 +250,7 @@ def _load_table(
             or converting a record.
     """
     enforced_targets = {
-        col.sql_name: id_to_sql[col.link_target_table_id]
+        col.sql_name: index.sql_name_for(col.link_target_table_id)
         for col in schema.columns
         if col.link_target_table_id is not None
         and plan.fk_status_by_column.get((schema.sql_name, col.sql_name)) == FkStatus.ENFORCED
@@ -350,7 +350,7 @@ def _insert_column_provenance(
 
 
 def _run_post_load_antijoin(
-    schemas: Sequence[TableSchema], plan: ResolvedPlan, *, conn: duckdb.DuckDBPyConnection
+    plan: ResolvedPlan, *, conn: duckdb.DuckDBPyConnection, index: SchemaIndex
 ) -> list[_IssueRow]:
     """
     Build a `dangling_link` issue row (detail='kept') for each non-enforced dangling link.
@@ -362,19 +362,18 @@ def _run_post_load_antijoin(
     the caller inserts them as part of one deterministic, sorted batch.
 
     Args:
-        schemas: The table IRs.
         plan: The resolved FK/topo plan.
         conn: An open DuckDB connection, with every table already loaded.
+        index: Lookup maps for the exported tables.
 
     Returns:
         The `_export_issues` rows found by the anti-join, in query order.
     """
-    schema_by_sql_name = {schema.sql_name: schema for schema in schemas}
     issue_rows: list[_IssueRow] = []
     for link in plan.link_plans:
         if link.fk_status not in (FkStatus.BACK_EDGE, FkStatus.SELF_LINK, FkStatus.LIST_NO_FK):
             continue
-        schema = schema_by_sql_name[link.table_sql_name]
+        schema = index.by_sql_name[link.table_sql_name]
         col = next(c for c in schema.columns if c.sql_name == link.column_sql_name)
         quoted_name_col = quote_identifier(RECORD_NAME_COLUMN)
         quoted_table = quote_identifier(schema.sql_name)

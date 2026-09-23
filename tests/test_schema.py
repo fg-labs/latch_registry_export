@@ -4,6 +4,7 @@ import polars as pl
 import pytest
 
 from latch_registry_export.errors import UnsupportedTypeError
+from latch_registry_export.schema import SchemaIndex
 from latch_registry_export.schema import build_table_schema
 from latch_registry_export.schema import map_registry_type
 from latch_registry_export.schema import resolve_column_sql_names
@@ -176,3 +177,14 @@ def test_build_table_schema_not_allow_empty_is_not_nullable() -> None:
     schema = build_table_schema("1", display_name=None, columns=cols, sql_name="t")
     (required_col,) = [c for c in schema.columns if c.registry_key == "required"]
     assert required_col.nullable is False
+
+
+def test_schema_index_from_schemas() -> None:
+    samples = build_table_schema("11730", display_name="Samples", columns={}, sql_name="samples")
+    runs = build_table_schema("11731", display_name="Runs", columns={}, sql_name="runs")
+    index = SchemaIndex.from_schemas([samples, runs])
+
+    assert index.by_id == {"11730": samples, "11731": runs}
+    assert index.by_sql_name == {"samples": samples, "runs": runs}
+    assert index.sql_name_for("11730") == "samples"
+    assert index.sql_name_for("11731") == "runs"
