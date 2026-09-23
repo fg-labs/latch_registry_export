@@ -1,6 +1,8 @@
 import datetime as dt
+import logging
 from collections.abc import Iterator
 from collections.abc import Mapping
+from collections.abc import Sequence
 
 import duckdb
 import polars as pl
@@ -13,6 +15,7 @@ from latch_registry_export.errors import EmptyRecordNameError
 from latch_registry_export.schema import ColumnSchema
 from latch_registry_export.schema import TableSchema
 from latch_registry_export.writer import RunMeta
+from latch_registry_export.writer import _format_elapsed
 from latch_registry_export.writer import write_export
 
 
@@ -449,3 +452,99 @@ def test_write_export_name_and_conversion_guards(
     con = duckdb.connect(":memory:")
     with pytest.raises(expected_exception):
         write_export([t], plan, conn=con, run_meta=_run_meta())
+
+
+class _FakeClock:
+    """A settable stand-in for `time.monotonic`."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _export_timed(
+    monkeypatch: pytest.MonkeyPatch, arrival_times: Mapping[str, Sequence[float]]
+) -> None:
+    """
+    Export one single-column table per entry, one record per page, on a fake clock.
+
+    Each table's `i`-th record arrives (and, with `page_size=1`, is inserted) at
+    `arrival_times[table_id][i]` seconds.
+    """
+    clock = _FakeClock()
+    monkeypatch.setattr("latch_registry_export.writer._monotonic", clock)
+
+    def fake_fetch(table_id: str, *, page_size: int = 100) -> Iterator[_FakeRecord]:  # noqa: ARG001
+        for i, arrival in enumerate(arrival_times[table_id]):
+            clock.now = arrival
+            yield _FakeRecord(f"r{i}", {})
+
+    monkeypatch.setattr("latch_registry_export.writer.fetch_table_records", fake_fetch)
+    schemas = [TableSchema(tid, f"t{tid}", None, (_name_col(),)) for tid in arrival_times]
+    write_export(
+        schemas,
+        resolve_dependencies(schemas),
+        conn=duckdb.connect(":memory:"),
+        run_meta=_run_meta(page_size=1),
+    )
+
+
+def _writer_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "latch_registry_export.writer"]
+
+
+def test_write_export_logs_table_start_and_done(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Each table logs its position before loading, then its count, time, and rate."""
+    with caplog.at_level(logging.INFO, logger="latch_registry_export.writer"):
+        _export_timed(monkeypatch, {"1": [1.0, 2.0, 4.0, 8.0], "2": []})
+
+    messages = _writer_messages(caplog)
+    assert "Exporting table 1/2: t1 (id 1)" in messages
+    assert "t1: done, 4 records in 8s (0.5 records/s)" in messages
+    assert "Exporting table 2/2: t2 (id 2)" in messages
+    assert "t2: done, 0 records in 0s (n/a records/s)" in messages
+
+
+@pytest.mark.parametrize(
+    ("arrival_times", "expected_progress"),
+    [
+        pytest.param([5.0, 10.0, 29.9], [], id="all-within-interval-no-progress"),
+        pytest.param([30.0], ["t1: 1 records (0.0 records/s)"], id="at-interval-logs"),
+        pytest.param(
+            [10.0, 31.0, 35.0], ["t1: 2 records (0.1 records/s)"], id="first-page-past-interval"
+        ),
+        pytest.param(
+            [31.0, 40.0, 60.9, 62.0],
+            ["t1: 1 records (0.0 records/s)", "t1: 4 records (0.1 records/s)"],
+            id="interval-restarts-after-each-log",
+        ),
+    ],
+)
+def test_write_export_logs_progress_at_most_every_30s(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    arrival_times: list[float],
+    expected_progress: list[str],
+) -> None:
+    with caplog.at_level(logging.INFO, logger="latch_registry_export.writer"):
+        _export_timed(monkeypatch, {"1": arrival_times})
+
+    progress = [m for m in _writer_messages(caplog) if m.startswith("t1: ") and "done" not in m]
+    assert progress == expected_progress
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        pytest.param(0.0, "0s", id="zero"),
+        pytest.param(4.6, "4s", id="seconds-truncated"),
+        pytest.param(76.0, "1m 16s", id="minutes"),
+        pytest.param(3723.0, "1h 02m 03s", id="hours-zero-padded"),
+    ],
+)
+def test_format_elapsed(seconds: float, expected: str) -> None:
+    assert _format_elapsed(seconds) == expected
