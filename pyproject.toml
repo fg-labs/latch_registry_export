@@ -43,7 +43,7 @@ latch_registry_export = "latch_registry_export.main:run"
 
 [dependency-groups]
 dev = [
-    "ruff==0.16.7",
+    "ruff==0.16.8",
     "mypy==2.3.1",
     "pytest>=8.4,<10.0",
     "pytest-cov>=6.2,<8.0",
