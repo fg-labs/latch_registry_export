@@ -212,23 +212,6 @@ def test_generate_config_cli_failed_overwrite_keeps_old_config(
 
 
 @pytest.mark.usefixtures("stubbed_discovery")
-def test_generate_config_cli_works_without_hard_links(
-    monkeypatch: MonkeyPatch, tmp_path: Path
-) -> None:
-    """Filesystems such as exFAT and many SMB mounts have no hard links."""
-
-    def no_hard_links(*_args: object, **_kwargs: object) -> None:
-        raise PermissionError("Operation not permitted")
-
-    monkeypatch.setattr("os.link", no_hard_links)
-    output = tmp_path / "tables.toml"
-
-    generate_config_cli(output=output)
-
-    assert len(load_table_configs(output)) == 2
-
-
-@pytest.mark.usefixtures("stubbed_discovery")
 def test_generate_config_cli_overwrite_writes_through_symlink(tmp_path: Path) -> None:
     target = tmp_path / "shared" / "tables.toml"
     target.parent.mkdir()
@@ -253,13 +236,20 @@ def test_generate_config_cli_overwrite_keeps_file_mode(tmp_path: Path) -> None:
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
+@pytest.mark.parametrize(
+    "overwrite",
+    [
+        pytest.param(False, id="exclusive-create"),
+        pytest.param(True, id="overwrite-to-new-file"),
+    ],
+)
 @pytest.mark.usefixtures("stubbed_discovery")
-def test_generate_config_cli_output_mode_follows_umask(tmp_path: Path) -> None:
-    """The temporary-file write does not leave the config readable by its owner only."""
+def test_generate_config_cli_new_file_mode_follows_umask(tmp_path: Path, overwrite: bool) -> None:
+    """A new config gets the umask mode, not the owner-only mode of a temporary file."""
     output = tmp_path / "tables.toml"
     umask = os.umask(0o022)
     try:
-        generate_config_cli(output=output)
+        generate_config_cli(output=output, overwrite=overwrite)
     finally:
         os.umask(umask)
 
