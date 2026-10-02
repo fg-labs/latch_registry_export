@@ -51,10 +51,10 @@ latch workspace
 Then export the tables to a DuckDB file:
 
 ```console
-uv run latch_registry_export --config tables.toml --output registry.duckdb
+uv run latch_registry_export export --config tables.toml --output registry.duckdb
 ```
 
-Options:
+Options for `export`:
 - `--page-size N` — page size for streaming records from the Registry (default 100).
 - `--overwrite` — replace an existing output file.
 - `--log-level LEVEL` — one of `DEBUG`, `INFO`, `WARNING`, `ERROR` (default `INFO`).
@@ -72,6 +72,12 @@ The reproducibility target is content-equivalence of the DATA tables, plus
 `_export_tables`, `_export_columns`, and `_export_issues`. `_export_run` varies
 run-to-run by design (timestamp, dependency versions, page size), so exclude it
 when you compare two exports.
+
+## Migration
+
+The exporter is now the `export` subcommand. Change
+`latch_registry_export --config ...` to `latch_registry_export export --config ...`.
+All flags are the same.
 
 ## Recommended Installation
 
