@@ -14,7 +14,7 @@ from latch_registry_export.errors import UnknownColumnError
 from latch_registry_export.schema import HasUpstreamType
 from latch_registry_export.schema import TableSchema
 from latch_registry_export.schema import build_table_schema
-from latch_registry_export.schema import sanitize_identifier
+from latch_registry_export.schema import default_table_name
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +65,7 @@ def build_schemas(tables: Sequence[TableConfig]) -> list[TableSchema]:
         }
         if cfg.include_columns is not None or cfg.exclude_columns is not None:
             logger.info("Table %s: exporting columns %s", cfg.id, sorted(columns))
-        sql_name = (
-            cfg.name
-            if cfg.name is not None
-            else (sanitize_identifier(display_name) if display_name else f"table_{cfg.id}")
-        )
+        sql_name = cfg.name if cfg.name is not None else default_table_name(cfg.id, display_name)
         _validate_resolved_table_name(sql_name, used_sql_names)
         used_sql_names.add(sql_name)
         schemas.append(
