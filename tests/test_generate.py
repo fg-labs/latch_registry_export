@@ -69,6 +69,23 @@ def _round_trip(tmp_path: Path, tables: Sequence[DiscoveredTable]) -> list[Table
             id="lowest-id-keeps-colliding-name-and-others-get-id-suffix",
         ),
         pytest.param(
+            [_table("10", "A"), _table("9", "A")],
+            [
+                TableConfig(id="10", name="a_10", include_columns=("a",)),
+                TableConfig(id="9", name="a", include_columns=("a",)),
+            ],
+            id="lowest-numeric-id-keeps-name-regardless-of-input-order",
+        ),
+        pytest.param(
+            [_table("3", "サンプル"), _table("4", "試料"), _table("5", "2024 runs")],
+            [
+                TableConfig(id="3", name="table_3", include_columns=("a",)),
+                TableConfig(id="4", name="table_4", include_columns=("a",)),
+                TableConfig(id="5", name="col_2024_runs", include_columns=("a",)),
+            ],
+            id="display-name-without-ascii-letters-or-digits-falls-back-to-table-id",
+        ),
+        pytest.param(
             [_table("5", "A"), _table("6", "A"), _table("9", "A 6")],
             [
                 TableConfig(id="5", name="a", include_columns=("a",)),

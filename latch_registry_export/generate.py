@@ -69,11 +69,12 @@ def to_config_toml(tables: Sequence[DiscoveredTable], *, workspace_id: str) -> s
     """
     Render a config that exports every column of every table, for a user to hand-edit.
 
-    Each entry suggests a `name`, chosen with `default_table_name` as the export does.
-    When names collide, the table with the lowest id keeps the name and the others get
-    the table id as a suffix. Each entry lists every column key in `include_columns`.
-    A table without columns has no `include_columns`, so the export includes every
-    column added to it later.
+    Each entry suggests a `name`, chosen with `default_table_name` as the export does,
+    except that a display name with no ASCII letters or digits gives `table_<id>`
+    instead of a bare `col_`. When names collide, the table with the lowest id keeps
+    the name and the others get the table id as a suffix. Each entry lists every
+    column key in `include_columns`. A table without columns has no `include_columns`,
+    so the export includes every column added to it later.
 
     Args:
         tables: The tables to list, in output order.
@@ -112,12 +113,12 @@ def _suggest_table_names(tables: Sequence[DiscoveredTable]) -> dict[str, str]:
     """
     Suggest a unique DuckDB table name for each table, keyed by table id.
 
-    Start from `default_table_name`. In each group of tables that share a name, the
+    Start from `_initial_table_name`. In each group of tables that share a name, the
     table with the lowest id keeps it and the others get `_<id>`. Repeat until all
     names are unique. The loop ends because ids are unique and each pass makes the
     renamed names longer.
     """
-    names = {t.id: default_table_name(t.id, t.display_name) for t in tables}
+    names = {t.id: _initial_table_name(t) for t in tables}
     while True:
         ids_by_name: defaultdict[str, list[str]] = defaultdict(list)
         for table_id, name in names.items():
@@ -129,3 +130,10 @@ def _suggest_table_names(tables: Sequence[DiscoveredTable]) -> dict[str, str]:
             return names
         for table_id in renamed:
             names[table_id] = f"{names[table_id]}_{table_id}"
+
+
+def _initial_table_name(table: DiscoveredTable) -> str:
+    """Return `default_table_name`, or `table_<id>` where that is a bare `col_`."""
+    name = default_table_name(table.id, table.display_name)
+    # `sanitize_identifier` gives a bare `col_` for a name with no ASCII letters or digits.
+    return f"table_{table.id}" if name == "col_" else name
