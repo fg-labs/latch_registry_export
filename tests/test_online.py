@@ -69,13 +69,15 @@ def test_soft_delete_fixture_table_exports(tmp_path: Path) -> None:
 
 @pytest.mark.requires_latch_registry
 def test_generated_config_loads_and_lists_every_column(tmp_path: Path) -> None:
-    """The config for the selected workspace loads, and lists each table's columns."""
+    """The config for the selected workspace loads, lists each table's columns, and resolves."""
     from latch.registry.table import Table
     from latch.utils import current_workspace
 
     from latch_registry_export.config import load_table_configs
+    from latch_registry_export.dependencies import resolve_dependencies
     from latch_registry_export.generate import discover_tables
     from latch_registry_export.generate import to_config_toml
+    from latch_registry_export.schema_builder import build_schemas
 
     workspace_id = current_workspace()
     tables = discover_tables(workspace_id=workspace_id)
@@ -87,3 +89,6 @@ def test_generated_config_loads_and_lists_every_column(tmp_path: Path) -> None:
     for config in configs:
         expected_keys = tuple(Table(id=config.id).get_columns() or {})
         assert (config.include_columns or ()) == expected_keys, config.id
+
+    # `export` accepts the unedited config: names, column types, and link targets resolve.
+    resolve_dependencies(build_schemas(configs))
