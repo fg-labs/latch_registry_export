@@ -134,7 +134,7 @@ addopts    = [
     "--cov"
 ]
 markers    = [
-    "requires_latch_registry: test requires a live Latch Registry connection",
+    "requires_latch_registry: test requires a live Latch Registry connection in the Fulcrum workspace",
 ]
 
 [tool.coverage.run]

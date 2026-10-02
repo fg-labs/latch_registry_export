@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.constants import FULCRUM_WORKSPACE_ID
 from tests.constants import MOCK_TABLE_SAMPLES_ID
 from tests.constants import SOFT_DELETE_FIXTURE_TABLE_ID
 
@@ -69,9 +70,8 @@ def test_soft_delete_fixture_table_exports(tmp_path: Path) -> None:
 
 @pytest.mark.requires_latch_registry
 def test_generated_config_loads_and_lists_every_column(tmp_path: Path) -> None:
-    """The config for the selected workspace loads, lists each table's columns, and resolves."""
+    """The Fulcrum workspace's config loads, lists each table's columns, and resolves."""
     from latch.registry.table import Table
-    from latch.utils import current_workspace
 
     from latch_registry_export.config import load_table_configs
     from latch_registry_export.dependencies import resolve_dependencies
@@ -79,10 +79,9 @@ def test_generated_config_loads_and_lists_every_column(tmp_path: Path) -> None:
     from latch_registry_export.generate import to_config_toml
     from latch_registry_export.schema_builder import build_schemas
 
-    workspace_id = current_workspace()
-    tables = discover_tables(workspace_id=workspace_id)
+    tables = discover_tables(workspace_id=FULCRUM_WORKSPACE_ID)
     path = tmp_path / "tables.toml"
-    path.write_text(to_config_toml(tables, workspace_id=workspace_id), encoding="utf-8")
+    path.write_text(to_config_toml(tables, workspace_id=FULCRUM_WORKSPACE_ID), encoding="utf-8")
     configs = load_table_configs(path)
 
     assert [c.id for c in configs] == [t.id for t in tables]
