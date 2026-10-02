@@ -229,11 +229,11 @@ def test_generate_config_cli_overwrite_writes_through_symlink(tmp_path: Path) ->
 def test_generate_config_cli_overwrite_keeps_file_mode(tmp_path: Path) -> None:
     output = tmp_path / "tables.toml"
     output.write_text("# hand-edited\n")
-    output.chmod(0o600)
+    output.chmod(0o640)  # neither the umask default nor `mkstemp`'s 0600
 
     generate_config_cli(output=output, overwrite=True)
 
-    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(output.stat().st_mode) == 0o640
 
 
 @pytest.mark.parametrize(
