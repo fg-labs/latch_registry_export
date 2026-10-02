@@ -18,6 +18,7 @@ dependencies    = [
     "polars~=1.44",
     "pyarrow~=25.0",  # required for DuckDB's Arrow-backed scan over a registered polars frame
     "pydantic~=2.11",
+    "tomli-w~=1.2",
 ]
 classifiers     = [
     "Development Status :: 3 - Alpha",
