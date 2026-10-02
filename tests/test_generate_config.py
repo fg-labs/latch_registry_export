@@ -102,3 +102,33 @@ def test_cli_surfaces_inaccessible_workspace_and_exits_one(
 
     assert exc_info.value.code == 1
     assert "lack permissions" in caplog.text
+
+
+@pytest.mark.usefixtures("stubbed_discovery")
+def test_generate_config_cli_creates_missing_parent_directories(tmp_path: Path) -> None:
+    output = tmp_path / "configs" / "nested" / "tables.toml"
+
+    generate_config_cli(output=output)
+
+    assert len(load_table_configs(output)) == 2
+
+
+def test_generate_config_cli_refuses_output_created_during_discovery(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """A file that appears while the workspace is listed is not replaced without `overwrite`."""
+    output = tmp_path / "tables.toml"
+
+    def discovery_racing_another_writer(*, workspace_id: str) -> list[DiscoveredTable]:
+        output.write_text(f"# written by another run in {workspace_id}\n")
+        return _TABLES
+
+    monkeypatch.setattr(
+        "latch_registry_export.tools.generate_config.discover_tables",
+        discovery_racing_another_writer,
+    )
+    monkeypatch.setattr("latch.utils.current_workspace", lambda: "ws-1")
+
+    with pytest.raises(OutputExistsError, match="use overwrite"):
+        generate_config_cli(output=output)
+    assert output.read_text() == "# written by another run in ws-1\n"

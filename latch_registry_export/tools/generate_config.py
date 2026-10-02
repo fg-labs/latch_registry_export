@@ -35,8 +35,15 @@ def generate_config_cli(
     logging.getLogger().setLevel(log_level)
     if output.exists() and not overwrite:
         raise OutputExistsError(f"output exists (use overwrite): {output}")
+    output.parent.mkdir(parents=True, exist_ok=True)
     workspace_id = current_workspace()
     logger.info(f"Listing Registry tables in workspace {workspace_id}")
     tables = discover_tables(workspace_id=workspace_id)
-    output.write_text(to_config_toml(tables, workspace_id=workspace_id), encoding="utf-8")
+    text = to_config_toml(tables, workspace_id=workspace_id)
+    # Exclusive create, so a file that appeared during discovery is not replaced.
+    try:
+        with output.open("w" if overwrite else "x", encoding="utf-8") as fh:
+            fh.write(text)
+    except FileExistsError as exc:
+        raise OutputExistsError(f"output exists (use overwrite): {output}") from exc
     print(f"Wrote {len(tables)} table(s) to {output}")
