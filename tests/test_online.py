@@ -65,3 +65,23 @@ def test_soft_delete_fixture_table_exports(tmp_path: Path) -> None:
     assert row_count == 2
     assert not report.issue_counts
     assert not report.degraded_links
+
+
+@pytest.mark.requires_latch_registry
+def test_generated_config_loads_and_lists_every_column(tmp_path: Path) -> None:
+    """The config for the selected workspace loads, and lists each table's columns."""
+    from latch.registry.table import Table
+
+    from latch_registry_export.config import load_table_configs
+    from latch_registry_export.generate import discover_tables
+    from latch_registry_export.generate import to_config_toml
+
+    tables = discover_tables()
+    path = tmp_path / "tables.toml"
+    path.write_text(to_config_toml(tables, workspace_id="online"))
+    configs = load_table_configs(path)
+
+    assert [c.id for c in configs] == [t.id for t in tables]
+    first = configs[0]
+    expected_keys = tuple(Table(id=first.id).get_columns() or {})
+    assert (first.include_columns or ()) == expected_keys

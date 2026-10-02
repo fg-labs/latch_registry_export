@@ -9,14 +9,19 @@ from collections.abc import Mapping
 
 import defopt
 import duckdb
+from latch.account import AccountNotFoundError
 from latch_sdk_gql import AuthenticationError
 
 from latch_registry_export import ExportError
 from latch_registry_export.tools.export import export_cli
+from latch_registry_export.tools.generate_config import generate_config_cli
 
 logger = logging.getLogger("latch_registry_export")
 
-_tools: Mapping[str, Callable[..., None]] = {"export": export_cli}
+_tools: Mapping[str, Callable[..., None]] = {
+    "export": export_cli,
+    "generate-config": generate_config_cli,
+}
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -42,7 +47,14 @@ def run() -> None:
     logger.info(f"Executing: {' '.join(sys.argv)}")
     try:
         defopt.run(_tools, argv=sys.argv[1:], version=True)
-    except (ExportError, ValueError, OSError, duckdb.Error, AuthenticationError) as e:
+    except (
+        ExportError,
+        ValueError,
+        OSError,
+        duckdb.Error,
+        AuthenticationError,
+        AccountNotFoundError,
+    ) as e:
         logger.error(str(e))
         raise SystemExit(1) from e
     logger.info("Finished executing successfully.")
