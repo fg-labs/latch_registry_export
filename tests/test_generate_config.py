@@ -1,3 +1,5 @@
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -151,3 +153,42 @@ def test_generate_config_cli_leaves_no_file_when_encoding_fails(
     with pytest.raises(UnicodeEncodeError):
         generate_config_cli(output=output)
     assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("overwrite", "failing_call"),
+    [
+        pytest.param(True, "os.replace", id="overwrite-keeps-old-config-when-swap-fails"),
+        pytest.param(False, "os.link", id="exclusive-leaves-no-file-when-swap-fails"),
+    ],
+)
+@pytest.mark.usefixtures("stubbed_discovery")
+def test_generate_config_cli_failed_write_keeps_directory_unchanged(
+    monkeypatch: MonkeyPatch, tmp_path: Path, overwrite: bool, failing_call: str
+) -> None:
+    output = tmp_path / "tables.toml"
+    if overwrite:
+        output.write_text("# hand-edited\n")
+    before = {p.name: p.read_text() for p in tmp_path.iterdir()}
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(failing_call, fail)
+
+    with pytest.raises(OSError, match="disk full"):
+        generate_config_cli(output=output, overwrite=overwrite)
+    assert {p.name: p.read_text() for p in tmp_path.iterdir()} == before
+
+
+@pytest.mark.usefixtures("stubbed_discovery")
+def test_generate_config_cli_output_mode_follows_umask(tmp_path: Path) -> None:
+    """The temporary-file write does not leave the config readable by its owner only."""
+    output = tmp_path / "tables.toml"
+    umask = os.umask(0o022)
+    try:
+        generate_config_cli(output=output)
+    finally:
+        os.umask(umask)
+
+    assert stat.S_IMODE(output.stat().st_mode) == 0o644
