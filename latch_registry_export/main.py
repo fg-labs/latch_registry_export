@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Callable
+from collections.abc import Mapping
 
 import defopt
 import duckdb
@@ -13,6 +15,8 @@ from latch_registry_export import ExportError
 from latch_registry_export.tools.export import export_cli
 
 logger = logging.getLogger("latch_registry_export")
+
+_tools: Mapping[str, Callable[..., None]] = {"export": export_cli}
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -33,11 +37,11 @@ def setup_logging(level: str = "INFO") -> None:
 
 
 def run() -> None:
-    """Set up logging, then hand over to defopt for running the exporter."""
+    """Set up logging, then hand over to defopt for running the selected subcommand."""
     setup_logging()
     logger.info(f"Executing: {' '.join(sys.argv)}")
     try:
-        defopt.run(export_cli, argv=sys.argv[1:], version=True)
+        defopt.run(_tools, argv=sys.argv[1:], version=True)
     except (ExportError, ValueError, OSError, duckdb.Error, AuthenticationError) as e:
         logger.error(str(e))
         raise SystemExit(1) from e
