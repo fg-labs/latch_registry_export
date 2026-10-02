@@ -31,7 +31,10 @@ uv run latch_registry_export generate-config --output tables.toml
 
 The generated config has one `[[tables]]` entry for each table in the workspace.
 Each entry has a suggested `name` and lists every column in `include_columns`.
-A comment above each entry gives the project and table display name. Edit the file
+If two tables get the same name, the table with the lowest id keeps it and the
+others get their id as a suffix. A comment above each entry gives the project and
+table display name. A table with no columns has no `include_columns`, so the export
+includes every column added to it later. Edit the file
 to remove tables, remove columns, or change names, then export it as usual.
 `generate-config` does not replace an existing file unless you set `--overwrite`,
 so it does not overwrite your edits by accident. It also accepts `--log-level`.
@@ -40,8 +43,8 @@ When you edit a generated config:
 - If you remove a table, also remove the link columns in other tables that point to it.
   Otherwise the export fails because a link targets a table that is not in the config.
 - The export uses only the columns in `include_columns`. Columns that someone adds to
-  the Registry later are not exported. To export new columns automatically, use
-  `exclude_columns` or remove `include_columns`.
+  the Registry later are not exported. To export new columns automatically, replace
+  `include_columns` with `exclude_columns`, or remove `include_columns`.
 
 A config that you write from the start can be short:
 
