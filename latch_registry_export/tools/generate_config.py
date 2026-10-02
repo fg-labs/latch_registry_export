@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -29,7 +30,8 @@ def generate_config_cli(
 
     Args:
         output: Destination TOML file.
-        overwrite: Overwrite an existing output file.
+        overwrite: Replace an existing output file. A symlink is followed, and the file
+            keeps its mode.
         log_level: Logging level. gql request and response bodies are never logged.
     """
     from latch.utils import current_workspace
@@ -42,35 +44,51 @@ def generate_config_cli(
     logger.info(f"Listing Registry tables in workspace {workspace_id}")
     tables = discover_tables(workspace_id=workspace_id)
     data = to_config_toml(tables, workspace_id=workspace_id).encode("utf-8")
-    _write_atomically(output, data, overwrite=overwrite)
+    _write_config(output, data, overwrite=overwrite)
     print(f"Wrote {len(tables)} table(s) to {output}")
 
 
-def _write_atomically(output: Path, data: bytes, *, overwrite: bool) -> None:
+def _write_config(output: Path, data: bytes, *, overwrite: bool) -> None:
     """
-    Write `data` to `output` in one step, so a failed write leaves `output` unchanged.
-
-    Writes a temporary file next to `output`, then moves it into place. Without
-    `overwrite`, a hard link does the move: it fails if `output` appeared since the
-    caller checked, so the file is never replaced.
+    Write `data` to `output` so that a failed write never leaves a partial config.
 
     Raises:
         OutputExistsError: `output` exists and `overwrite` is False.
     """
-    fd, tmp_name = tempfile.mkstemp(suffix=".toml", dir=output.parent)
+    if overwrite:
+        _replace_file(output.resolve(), data)
+    else:
+        _create_file(output, data)
+
+
+def _create_file(output: Path, data: bytes) -> None:
+    """Create `output` exclusively, and remove it again if the write fails."""
+    try:
+        fh = output.open("xb")
+    except FileExistsError as exc:
+        raise OutputExistsError(f"output exists (use overwrite): {output}") from exc
+    try:
+        with fh:
+            fh.write(data)
+    except BaseException:
+        output.unlink(missing_ok=True)
+        raise
+
+
+def _replace_file(target: Path, data: bytes) -> None:
+    """Replace `target` in one step, keeping its mode, so a failed write leaves it unchanged."""
+    if target.exists():
+        mode = stat.S_IMODE(target.stat().st_mode)
+    else:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as fh:
-            # `mkstemp` creates the file as 0600; give it the mode a plain `open` would.
-            umask = os.umask(0)
-            os.umask(umask)
-            os.fchmod(fh.fileno(), 0o666 & ~umask)
+            os.fchmod(fh.fileno(), mode)
             fh.write(data)
-        if overwrite:
-            os.replace(tmp_path, output)
-        else:
-            os.link(tmp_path, output)
-    except FileExistsError as exc:
-        raise OutputExistsError(f"output exists (use overwrite): {output}") from exc
+        os.replace(tmp_path, target)
     finally:
         tmp_path.unlink(missing_ok=True)

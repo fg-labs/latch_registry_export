@@ -1,6 +1,8 @@
 import os
 import stat
 from pathlib import Path
+from typing import IO
+from typing import Any
 
 import pytest
 from latch.account import AccountNotFoundError
@@ -155,30 +157,100 @@ def test_generate_config_cli_leaves_no_file_when_encoding_fails(
     assert not output.exists()
 
 
-@pytest.mark.parametrize(
-    ("overwrite", "failing_call"),
-    [
-        pytest.param(True, "os.replace", id="overwrite-keeps-old-config-when-swap-fails"),
-        pytest.param(False, "os.link", id="exclusive-leaves-no-file-when-swap-fails"),
-    ],
-)
+def _fail_writes_to(monkeypatch: MonkeyPatch, *, mode_flag: str) -> None:
+    """Make `write` fail on files that `Path.open` opens with `mode_flag` in the mode."""
+    real_open = Path.open
+
+    class _FailingWriter:
+        def __init__(self, fh: IO[bytes]) -> None:
+            self._fh = fh
+
+        def __enter__(self) -> "_FailingWriter":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            self._fh.close()
+
+        def write(self, _data: bytes) -> int:
+            raise OSError("disk full")
+
+    def open_with_failing_write(self: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        fh = real_open(self, mode, *args, **kwargs)
+        return _FailingWriter(fh) if mode_flag in mode else fh
+
+    monkeypatch.setattr(Path, "open", open_with_failing_write)
+
+
 @pytest.mark.usefixtures("stubbed_discovery")
-def test_generate_config_cli_failed_write_keeps_directory_unchanged(
-    monkeypatch: MonkeyPatch, tmp_path: Path, overwrite: bool, failing_call: str
+def test_generate_config_cli_failed_exclusive_write_leaves_no_file(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """A partial file from a failed write is removed, so it does not block a retry."""
+    output = tmp_path / "tables.toml"
+    _fail_writes_to(monkeypatch, mode_flag="x")
+
+    with pytest.raises(OSError, match="disk full"):
+        generate_config_cli(output=output)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.usefixtures("stubbed_discovery")
+def test_generate_config_cli_failed_overwrite_keeps_old_config(
+    monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     output = tmp_path / "tables.toml"
-    if overwrite:
-        output.write_text("# hand-edited\n")
-    before = {p.name: p.read_text() for p in tmp_path.iterdir()}
+    output.write_text("# hand-edited\n")
 
     def fail(*_args: object, **_kwargs: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(failing_call, fail)
+    monkeypatch.setattr("os.replace", fail)
 
     with pytest.raises(OSError, match="disk full"):
-        generate_config_cli(output=output, overwrite=overwrite)
-    assert {p.name: p.read_text() for p in tmp_path.iterdir()} == before
+        generate_config_cli(output=output, overwrite=True)
+    assert {p.name: p.read_text() for p in tmp_path.iterdir()} == {"tables.toml": "# hand-edited\n"}
+
+
+@pytest.mark.usefixtures("stubbed_discovery")
+def test_generate_config_cli_works_without_hard_links(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Filesystems such as exFAT and many SMB mounts have no hard links."""
+
+    def no_hard_links(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError("Operation not permitted")
+
+    monkeypatch.setattr("os.link", no_hard_links)
+    output = tmp_path / "tables.toml"
+
+    generate_config_cli(output=output)
+
+    assert len(load_table_configs(output)) == 2
+
+
+@pytest.mark.usefixtures("stubbed_discovery")
+def test_generate_config_cli_overwrite_writes_through_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "shared" / "tables.toml"
+    target.parent.mkdir()
+    target.write_text("# hand-edited\n")
+    link = tmp_path / "tables.toml"
+    link.symlink_to(target)
+
+    generate_config_cli(output=link, overwrite=True)
+
+    assert link.is_symlink()
+    assert len(load_table_configs(target)) == 2
+
+
+@pytest.mark.usefixtures("stubbed_discovery")
+def test_generate_config_cli_overwrite_keeps_file_mode(tmp_path: Path) -> None:
+    output = tmp_path / "tables.toml"
+    output.write_text("# hand-edited\n")
+    output.chmod(0o600)
+
+    generate_config_cli(output=output, overwrite=True)
+
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 @pytest.mark.usefixtures("stubbed_discovery")
