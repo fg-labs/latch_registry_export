@@ -176,7 +176,7 @@ def test_cli_log_level_sets_root_level(
     expected: int,
 ) -> None:
     """`--log-level` sets the root logger level; gql stays capped at WARNING."""
-    argv = ["latch_registry_export", "--config", str(table_config)]
+    argv = ["latch_registry_export", "export", "--config", str(table_config)]
     argv += ["--output", str(tmp_path / "r.duckdb")]
     if log_level is not None:
         argv += ["--log-level", log_level]
@@ -194,6 +194,7 @@ def test_cli_rejects_unknown_log_level(monkeypatch: MonkeyPatch, table_config: P
         "sys.argv",
         [
             "latch_registry_export",
+            "export",
             "--config",
             str(table_config),
             "--output",
@@ -207,11 +208,31 @@ def test_cli_rejects_unknown_log_level(monkeypatch: MonkeyPatch, table_config: P
     assert exc_info.value.code == 2
 
 
-def test_cli_help_lists_expected_flags(
+def test_cli_help_lists_subcommands(monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]) -> None:
+    """`run()` with `--help` lists the subcommands."""
+    monkeypatch.setattr("sys.argv", ["latch_registry_export", "--help"])
+    with pytest.raises(SystemExit) as exc_info:
+        run()
+    assert exc_info.value.code == 0
+    assert "export" in capsys.readouterr().out
+
+
+def test_cli_requires_subcommand(monkeypatch: MonkeyPatch, table_config: Path) -> None:
+    """The pre-subcommand form `latch_registry_export --config ...` is a usage error (exit 2)."""
+    monkeypatch.setattr(
+        "sys.argv",
+        ["latch_registry_export", "--config", str(table_config), "--output", "x.duckdb"],
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        run()
+    assert exc_info.value.code == 2
+
+
+def test_cli_export_help_lists_expected_flags(
     monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
 ) -> None:
-    """`run()` with `--help` documents every CLI flag."""
-    monkeypatch.setattr("sys.argv", ["latch_registry_export", "--help"])
+    """`run()` with `export --help` documents every export flag."""
+    monkeypatch.setattr("sys.argv", ["latch_registry_export", "export", "--help"])
     with pytest.raises(SystemExit) as exc_info:
         run()
     assert exc_info.value.code == 0
@@ -260,7 +281,7 @@ def test_cli_surfaces_known_errors_and_exits_one(
     monkeypatch.setattr("latch_registry_export.tools.export.export", failing_export)
     monkeypatch.setattr(
         "sys.argv",
-        ["latch_registry_export", "--config", str(table_config), "--output", str(output)],
+        ["latch_registry_export", "export", "--config", str(table_config), "--output", str(output)],
     )
 
     with caplog.at_level("ERROR"), pytest.raises(SystemExit) as exc_info:
@@ -284,7 +305,7 @@ def test_cli_lets_unexpected_errors_propagate(
     output = tmp_path / "r.duckdb"
     monkeypatch.setattr(
         "sys.argv",
-        ["latch_registry_export", "--config", str(table_config), "--output", str(output)],
+        ["latch_registry_export", "export", "--config", str(table_config), "--output", str(output)],
     )
 
     with pytest.raises(RuntimeError, match="genuinely unexpected"):
