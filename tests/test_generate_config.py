@@ -132,3 +132,22 @@ def test_generate_config_cli_refuses_output_created_during_discovery(
     with pytest.raises(OutputExistsError, match="use overwrite"):
         generate_config_cli(output=output)
     assert output.read_text() == "# written by another run in ws-1\n"
+
+
+def test_generate_config_cli_leaves_no_file_when_encoding_fails(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """A display name that cannot encode as UTF-8 leaves no file to block a retry."""
+    output = tmp_path / "tables.toml"
+    lone_surrogate = DiscoveredTable(
+        id="1", project_name="P", display_name="bad\ud800", column_keys=("a",)
+    )
+    monkeypatch.setattr(
+        "latch_registry_export.tools.generate_config.discover_tables",
+        lambda *, workspace_id: [lone_surrogate] if workspace_id == "ws-1" else [],
+    )
+    monkeypatch.setattr("latch.utils.current_workspace", lambda: "ws-1")
+
+    with pytest.raises(UnicodeEncodeError):
+        generate_config_cli(output=output)
+    assert not output.exists()

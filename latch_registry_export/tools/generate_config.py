@@ -39,11 +39,12 @@ def generate_config_cli(
     workspace_id = current_workspace()
     logger.info(f"Listing Registry tables in workspace {workspace_id}")
     tables = discover_tables(workspace_id=workspace_id)
-    text = to_config_toml(tables, workspace_id=workspace_id)
+    # Encode before creating the file, so an encoding error leaves no file behind.
+    data = to_config_toml(tables, workspace_id=workspace_id).encode("utf-8")
     # Exclusive create, so a file that appeared during discovery is not replaced.
     try:
-        with output.open("w" if overwrite else "x", encoding="utf-8") as fh:
-            fh.write(text)
+        with output.open("wb" if overwrite else "xb") as fh:
+            fh.write(data)
     except FileExistsError as exc:
         raise OutputExistsError(f"output exists (use overwrite): {output}") from exc
     print(f"Wrote {len(tables)} table(s) to {output}")
