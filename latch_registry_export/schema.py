@@ -63,6 +63,20 @@ def sanitize_identifier(raw: str) -> str:
     return collapsed
 
 
+def default_table_name(table_id: str, display_name: str | None) -> str:
+    """
+    Return the DuckDB table name to use when the config has no `name` override.
+
+    Args:
+        table_id: The Registry table id.
+        display_name: The table display name, if it has one.
+
+    Returns:
+        The sanitized display name, or `table_<id>` if the display name is missing or empty.
+    """
+    return sanitize_identifier(display_name) if display_name else f"table_{table_id}"
+
+
 def resolve_column_sql_names(registry_keys: Iterable[str], *, reserved: set[str]) -> dict[str, str]:
     """
     Map each registry column key to a unique sql identifier, deterministically.

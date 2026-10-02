@@ -214,7 +214,9 @@ def test_cli_help_lists_subcommands(monkeypatch: MonkeyPatch, capsys: CaptureFix
     with pytest.raises(SystemExit) as exc_info:
         run()
     assert exc_info.value.code == 0
-    assert "export" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    for subcommand in ("export", "generate-config"):
+        assert subcommand in out
 
 
 def test_cli_requires_subcommand(monkeypatch: MonkeyPatch, table_config: Path) -> None:

@@ -13,10 +13,14 @@ from latch_sdk_gql import AuthenticationError
 
 from latch_registry_export import ExportError
 from latch_registry_export.tools.export import export_cli
+from latch_registry_export.tools.generate_config import generate_config_cli
 
 logger = logging.getLogger("latch_registry_export")
 
-_tools: Mapping[str, Callable[..., None]] = {"export": export_cli}
+_tools: Mapping[str, Callable[..., None]] = {
+    "export": export_cli,
+    "generate-config": generate_config_cli,
+}
 
 
 def setup_logging(level: str = "INFO") -> None:

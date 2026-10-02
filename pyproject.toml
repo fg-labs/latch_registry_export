@@ -18,6 +18,7 @@ dependencies    = [
     "polars~=1.44",
     "pyarrow~=25.0",  # required for DuckDB's Arrow-backed scan over a registered polars frame
     "pydantic~=2.11",
+    "tomli-w~=1.2",
 ]
 classifiers     = [
     "Development Status :: 3 - Alpha",
@@ -133,7 +134,7 @@ addopts    = [
     "--cov"
 ]
 markers    = [
-    "requires_latch_registry: test requires a live Latch Registry connection",
+    "requires_latch_registry: test requires a live Latch Registry connection in the Fulcrum workspace",
 ]
 
 [tool.coverage.run]

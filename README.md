@@ -11,7 +11,42 @@ Latch Registry export to DuckDB
 
 ## Usage
 
-Write a TOML config that lists the Registry tables to export:
+Log in to Latch and select the workspace:
+
+```console
+latch login
+latch workspace
+```
+
+### Write a config
+
+A TOML config lists the Registry tables to export. You can write it from the start,
+or generate a config for the workspace and then edit it by hand.
+
+To generate a config, run:
+
+```console
+uv run latch_registry_export generate-config --output tables.toml
+```
+
+The generated config has one `[[tables]]` entry for each table in the workspace.
+Each entry has a suggested `name` and lists every column in `include_columns`.
+If two tables get the same name, the table with the lowest id keeps it and the
+others get their id as a suffix. A comment above each entry gives the project and
+table display name. A table with no columns has no `include_columns`, so the export
+includes every column added to it later. Edit the file
+to remove tables, remove columns, or change names, then export it as usual.
+`generate-config` does not replace an existing file unless you set `--overwrite`,
+so it does not overwrite your edits by accident. It also accepts `--log-level`.
+
+When you edit a generated config:
+- If you remove a table, also remove the link columns in other tables that point to it.
+  Otherwise the export fails because a link targets a table that is not in the config.
+- The export uses only the columns in `include_columns`. Columns that someone adds to
+  the Registry later are not exported. To export new columns automatically, replace
+  `include_columns` with `exclude_columns`, or remove `include_columns`.
+
+A config that you write from the start can be short:
 
 ```toml
 [[tables]]
@@ -41,14 +76,9 @@ column, the export does not create its foreign key, so the linked table need not
 in the config. The exporter still fetches all columns from the Registry, so column
 selection makes the output smaller but not the fetch faster.
 
-Log in to Latch and select the workspace:
+### Export
 
-```console
-latch login
-latch workspace
-```
-
-Then export the tables to a DuckDB file:
+Export the tables to a DuckDB file:
 
 ```console
 uv run latch_registry_export export --config tables.toml --output registry.duckdb
