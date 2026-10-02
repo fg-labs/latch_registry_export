@@ -9,7 +9,6 @@ from collections.abc import Mapping
 
 import defopt
 import duckdb
-from latch.account import AccountNotFoundError
 from latch_sdk_gql import AuthenticationError
 
 from latch_registry_export import ExportError
@@ -47,14 +46,7 @@ def run() -> None:
     logger.info(f"Executing: {' '.join(sys.argv)}")
     try:
         defopt.run(_tools, argv=sys.argv[1:], version=True)
-    except (
-        ExportError,
-        ValueError,
-        OSError,
-        duckdb.Error,
-        AuthenticationError,
-        AccountNotFoundError,
-    ) as e:
+    except (ExportError, ValueError, OSError, duckdb.Error, AuthenticationError) as e:
         logger.error(str(e))
         raise SystemExit(1) from e
     logger.info("Finished executing successfully.")

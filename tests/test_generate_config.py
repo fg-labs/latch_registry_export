@@ -23,7 +23,8 @@ _TABLES = [
 def stubbed_discovery(monkeypatch: MonkeyPatch) -> None:
     """Stub workspace discovery so the CLI never calls Latch."""
     monkeypatch.setattr(
-        "latch_registry_export.tools.generate_config.discover_tables", lambda: _TABLES
+        "latch_registry_export.tools.generate_config.discover_tables",
+        lambda *, workspace_id: _TABLES if workspace_id == "ws-1" else [],
     )
     monkeypatch.setattr("latch.utils.current_workspace", lambda: "ws-1")
 
@@ -40,7 +41,7 @@ def test_generate_config_cli_writes_loadable_config(
         TableConfig(id="1", name="samples", include_columns=("Gene",)),
         TableConfig(id="2", name="runs"),
     ]
-    assert "ws-1" in output.read_text()
+    assert "ws-1" in output.read_text(encoding="utf-8")
     assert f"Wrote 2 table(s) to {output}" in capsys.readouterr().out
 
 
@@ -79,11 +80,13 @@ def test_cli_runs_generate_config_subcommand(monkeypatch: MonkeyPatch, tmp_path:
     assert len(load_table_configs(output)) == 2
 
 
-def test_cli_surfaces_missing_workspace_and_exits_one(
+def test_cli_surfaces_inaccessible_workspace_and_exits_one(
     monkeypatch: MonkeyPatch, tmp_path: Path, caplog: LogCaptureFixture
 ) -> None:
-    def failing_discovery() -> list[DiscoveredTable]:
-        raise AccountNotFoundError("account does not exist or you lack permissions: id=9")
+    def failing_discovery(*, workspace_id: str) -> list[DiscoveredTable]:
+        raise AccountNotFoundError(
+            f"account does not exist or you lack permissions: id={workspace_id}"
+        )
 
     monkeypatch.setattr(
         "latch_registry_export.tools.generate_config.discover_tables", failing_discovery

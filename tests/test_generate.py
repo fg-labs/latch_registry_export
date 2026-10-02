@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from latch_registry_export import __version__
 from latch_registry_export.config import TableConfig
 from latch_registry_export.config import load_table_configs
 from latch_registry_export.generate import DiscoveredTable
@@ -27,7 +28,7 @@ def _table(
 
 def _round_trip(tmp_path: Path, tables: Sequence[DiscoveredTable]) -> list[TableConfig]:
     path = tmp_path / "tables.toml"
-    path.write_text(to_config_toml(tables, workspace_id="ws-1"))
+    path.write_text(to_config_toml(tables, workspace_id="ws-1"), encoding="utf-8")
     return load_table_configs(path)
 
 
@@ -61,18 +62,18 @@ def _round_trip(tmp_path: Path, tables: Sequence[DiscoveredTable]) -> list[Table
         pytest.param(
             [_table("1", "Samples!"), _table("2", "samples"), _table("3", "Runs")],
             [
-                TableConfig(id="1", name="samples_1", include_columns=("a",)),
+                TableConfig(id="1", name="samples", include_columns=("a",)),
                 TableConfig(id="2", name="samples_2", include_columns=("a",)),
                 TableConfig(id="3", name="runs", include_columns=("a",)),
             ],
-            id="colliding-names-get-id-suffix",
+            id="lowest-id-keeps-colliding-name-and-others-get-id-suffix",
         ),
         pytest.param(
-            [_table("5", "A"), _table("6", "A"), _table("9", "A 5")],
+            [_table("5", "A"), _table("6", "A"), _table("9", "A 6")],
             [
-                TableConfig(id="5", name="a_5_5", include_columns=("a",)),
+                TableConfig(id="5", name="a", include_columns=("a",)),
                 TableConfig(id="6", name="a_6", include_columns=("a",)),
-                TableConfig(id="9", name="a_5_9", include_columns=("a",)),
+                TableConfig(id="9", name="a_6_9", include_columns=("a",)),
             ],
             id="suffixed-name-colliding-with-natural-name-is-suffixed-again",
         ),
@@ -94,6 +95,11 @@ def _round_trip(tmp_path: Path, tables: Sequence[DiscoveredTable]) -> list[Table
             [TableConfig(id="1", name="multi_line_table", include_columns=("a",))],
             id="newlines-in-display-names-do-not-break-comments",
         ),
+        pytest.param(
+            [_table("1", "A\x0bB\x00", project_name="P\x7f\x1fQ\tR")],
+            [TableConfig(id="1", name="a_b", include_columns=("a",))],
+            id="control-characters-in-display-names-do-not-break-comments",
+        ),
     ],
 )
 def test_to_config_toml_round_trips(
@@ -102,14 +108,23 @@ def test_to_config_toml_round_trips(
     assert _round_trip(tmp_path, tables) == expected
 
 
-def test_to_config_toml_labels_each_table_with_project_and_display_name() -> None:
+def test_to_config_toml_comments_describe_workspace_and_each_table() -> None:
     text = to_config_toml(
-        [_table("1", "Samples", project_name="Assay"), _table("2", None, project_name="Assay")],
+        [
+            _table("1", "Samples", project_name="Assay"),
+            _table("2", None, project_name="Assay"),
+            _table("3", "Runs", [], project_name="Assay"),
+        ],
         workspace_id="ws-1",
     )
-    assert "ws-1" in text
+    assert f"latch_registry_export {__version__}" in text
+    assert "from workspace ws-1" in text
     assert '# Assay / Samples\n[[tables]]\nid = "1"' in text
     assert '# Assay / (no display name)\n[[tables]]\nid = "2"' in text
+    assert (
+        "# Assay / Runs\n# No columns yet, so the export includes every column added later.\n"
+        '[[tables]]\nid = "3"'
+    ) in text
 
 
 def test_to_config_toml_rejects_empty_table_list() -> None:
@@ -148,11 +163,11 @@ class _FakeProject:
 
 def _fake_account_class(projects: Mapping[str, Sequence[_FakeTable]]) -> type:
     class _FakeAccount:
-        @classmethod
-        def current(cls) -> "_FakeAccount":
-            return cls()
+        def __init__(self, *, id: str) -> None:  # noqa: A002 - matches the real `Account(id=...)`
+            self.id = id
 
         def list_registry_projects(self) -> list[_FakeProject]:
+            assert self.id == "ws-9"
             return [_FakeProject(name, tables) for name, tables in projects.items()]
 
     return _FakeAccount
@@ -168,7 +183,7 @@ def test_discover_tables_lists_every_table_sorted_by_numeric_id(
     })
     monkeypatch.setattr("latch.account.Account", fake_account_cls)
 
-    assert discover_tables() == [
+    assert discover_tables(workspace_id="ws-9") == [
         DiscoveredTable(id="9", project_name="Assay", display_name="Samples", column_keys=("k",)),
         DiscoveredTable(id="20", project_name="Other", display_name=None, column_keys=()),
         DiscoveredTable(

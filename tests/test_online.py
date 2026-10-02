@@ -71,17 +71,19 @@ def test_soft_delete_fixture_table_exports(tmp_path: Path) -> None:
 def test_generated_config_loads_and_lists_every_column(tmp_path: Path) -> None:
     """The config for the selected workspace loads, and lists each table's columns."""
     from latch.registry.table import Table
+    from latch.utils import current_workspace
 
     from latch_registry_export.config import load_table_configs
     from latch_registry_export.generate import discover_tables
     from latch_registry_export.generate import to_config_toml
 
-    tables = discover_tables()
+    workspace_id = current_workspace()
+    tables = discover_tables(workspace_id=workspace_id)
     path = tmp_path / "tables.toml"
-    path.write_text(to_config_toml(tables, workspace_id="online"))
+    path.write_text(to_config_toml(tables, workspace_id=workspace_id), encoding="utf-8")
     configs = load_table_configs(path)
 
     assert [c.id for c in configs] == [t.id for t in tables]
-    first = configs[0]
-    expected_keys = tuple(Table(id=first.id).get_columns() or {})
-    assert (first.include_columns or ()) == expected_keys
+    for config in configs:
+        expected_keys = tuple(Table(id=config.id).get_columns() or {})
+        assert (config.include_columns or ()) == expected_keys, config.id

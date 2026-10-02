@@ -37,6 +37,6 @@ def generate_config_cli(
         raise OutputExistsError(f"output exists (use overwrite): {output}")
     workspace_id = current_workspace()
     logger.info(f"Listing Registry tables in workspace {workspace_id}")
-    tables = discover_tables()
-    output.write_text(to_config_toml(tables, workspace_id=workspace_id))
+    tables = discover_tables(workspace_id=workspace_id)
+    output.write_text(to_config_toml(tables, workspace_id=workspace_id), encoding="utf-8")
     print(f"Wrote {len(tables)} table(s) to {output}")
