@@ -44,8 +44,8 @@ latch_registry_export = "latch_registry_export.main:run"
 
 [dependency-groups]
 dev = [
-    "ruff==0.16.9",
-    "mypy==2.3.1",
+    "ruff==0.16.10",
+    "mypy==2.4.0",
     "pytest>=8.4,<10.0",
     "pytest-cov>=6.2,<8.0",
     "pytest-mock ~=3.14",
