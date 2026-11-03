@@ -13,7 +13,7 @@ license-files   = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies    = [
     "defopt>=6.4,<8.0",
-    "duckdb~=1.5",
+    "duckdb>=1.5,<3.0",
     "fglatch>=0.7.2,<1.0",
     "polars>=1.44,<3.0",
     "pyarrow>=25,<27",  # required for DuckDB's Arrow-backed scan over a registered polars frame
