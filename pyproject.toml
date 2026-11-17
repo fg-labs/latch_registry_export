@@ -58,7 +58,7 @@ ipython = [
 
 [tool.uv]
 # Ignore releases younger than a week, so a compromised publish has time to be
-# caught before it can be locked. Must stay >= the Dependabot `cooldown` in
+# caught before it can be locked. Must stay <= the Dependabot `cooldown` in
 # .github/dependabot.yml, or Dependabot will propose versions that can't lock.
 exclude-newer = "1 week"
 
