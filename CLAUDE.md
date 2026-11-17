@@ -1,12 +1,49 @@
 # CLAUDE.md
 
-## Template Setup
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**On first interaction in a new project:** If this section is present, the project
-has not yet been initialized.
+## Project Overview
 
-Run `/init`, then replace this entire section with its output. Keep the rest of
-this CLAUDE.md intact below it.
+Exports Latch Registry tables to one DuckDB file. Library API in `__init__.py`; defopt
+subcommands `export` and `generate-config` registered in `main.py:_tools`.
+
+## Commands
+
+```console
+uv run poe fix-and-check-all   # before every commit
+uv run poe check-all           # what CI runs (Python 3.12-3.14)
+```
+
+Dependabot `cooldown` (14 days) must stay >= uv `exclude-newer` (1 week), or Dependabot
+proposes versions that cannot lock.
+
+## Architecture
+
+`api.export()` pipeline:
+
+1. `config.py` validates the TOML `[[tables]]` entries.
+2. `schema_builder.py` fetches Registry columns and builds the `schema.py` IR. Each table
+   gets a leading `name` primary key; `_export_` is reserved for metadata tables.
+3. `dependencies.py` gives each link column an `FkStatus`: `enforced`, `list_no_fk`,
+   `self_link`, or `back_edge` (demoted to break a cycle). Only `enforced` links become
+   `FOREIGN KEY`s and set the insert order.
+4. `writer.py` streams records in insert order. Dangling `enforced` links are set to NULL
+   inline; other dangling links are kept and found by an anti-join after all tables load.
+   Both go to `_export_issues`.
+5. `api.py` writes to a temp file, then `os.replace`s the output.
+
+The output must be content-equivalent across runs, not byte-identical. Every table except
+`_export_run` must be deterministic, so sort any new ordering logic by a stable key.
+
+Keep the `gql` logger capped at WARNING (`main.setup_logging`): it logs full response bodies.
+
+## Tests
+
+Offline tests stub the Registry with `monkeypatch.setattr` on `api.build_schemas`,
+`writer.fetch_table_records`, and `api._workspace_meta`.
+
+`requires_latch_registry` tests run only when the selected Latch workspace is the Fulcrum
+workspace (`tests/constants.py`). They read fixed fixture tables there.
 
 ## Git Workflow
 
